@@ -31,6 +31,9 @@ docker-compose up -d
 This starts:
 
 - **Jaeger** - Trace visualization at [http://localhost:16686](http://localhost:16686)
+- **Prometheus** - Trace Metrics from the App on port 9090
+- **Loki** - Visualize the App logs using pino on port 3100 but available in UI in grafana -> explore -> Loki
+- **Grafana** - Visualize the different data from the above port 3001 
 - **OTLP Collector** - Receives telemetry on port 4318
 
 ### 3. Run the Next.js App
@@ -40,6 +43,10 @@ bun dev
 ```
 
 Open [http://localhost:3000](http://localhost:3000) to see the interactive dashboard.
+
+#### To see logs in your Machine Terminal
+
+Open src/lib/telemetry/logger and change pino  level config from silent to info
 
 ## 📁 Project Structure
 
