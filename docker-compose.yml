@@ -1,0 +1,195 @@
+# ============================================================================
+# DOCKER COMPOSE - LOCAL OBSERVABILITY STACK
+# ============================================================================
+#
+# This Docker Compose file sets up a complete local observability stack for
+# learning and development. It includes:
+#
+# 1. JAEGER - Distributed tracing UI (view your traces)
+# 2. OTEL COLLECTOR - Receives telemetry data from your app
+#
+# 🎓 HOW IT WORKS:
+#
+# Your Next.js App → OTEL Collector → Jaeger UI
+#      (traces)        (receives)     (visualize)
+#
+# QUICK START:
+#   docker-compose up -d
+#
+# VIEW YOUR TRACES:
+#   Open http://localhost:16686 in your browser
+#
+# STOP:
+#   docker-compose down
+#
+# ============================================================================
+
+services:
+  # ============================================================================
+  # OPENTELEMETRY COLLECTOR
+  # ============================================================================
+  #
+  # 🎓 WHAT IS THE OTEL COLLECTOR?
+  # The collector receives all telemetry (traces, metrics, logs) from your app
+  # and routes them to the appropriate backends:
+  # - Traces → Jaeger
+  # - Metrics → Prometheus (via scrape endpoint)
+  # - Logs → Loki
+  #
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:0.91.0
+    container_name: otel-collector
+    restart: unless-stopped
+    command: ["--config=/etc/otel-collector-config.yaml"]
+    volumes:
+      - ./otel-collector-config.yaml:/etc/otel-collector-config.yaml
+    ports:
+      - "4317:4317" # OTLP gRPC
+      - "4318:4318" # OTLP HTTP (your app sends here)
+      - "8889:8889" # Prometheus metrics endpoint
+    networks:
+      - telemetry-net
+    depends_on:
+      - jaeger
+      - loki
+
+  # ============================================================================
+  # JAEGER - All-in-One
+  # ============================================================================
+  #
+  # 🎓 WHAT IS JAEGER?
+  # Jaeger is a distributed tracing platform. It:
+  # - Stores traces in memory (or can use Cassandra/Elasticsearch)
+  # - Provides a beautiful UI for viewing traces
+  # - Supports searching by service, operation, duration, etc.
+  #
+  # Jaeger All-in-One includes:
+  # - Collector (receives spans)
+  # - Query (API for UI)
+  # - UI (web interface)
+  # - In-memory storage
+  #
+  jaeger:
+    image: jaegertracing/all-in-one:1.54
+    container_name: jaeger
+    restart: unless-stopped
+    environment:
+      # 🎓 Enable OTLP receiver (OpenTelemetry Protocol)
+      - COLLECTOR_OTLP_ENABLED=true
+    ports:
+      - "16686:16686" # UI - OPEN THIS IN YOUR BROWSER!
+      - "14268:14268" # Jaeger collector
+    networks:
+      - telemetry-net
+
+  # ============================================================================
+  # PROMETHEUS - Metrics Collection
+  # ============================================================================
+  #
+  # 🎓 WHAT IS PROMETHEUS?
+  # Prometheus is a metrics database and monitoring system.
+  # It:
+  # - Scrapes metrics from exporters (your app exports via OTLP)
+  # - Stores time-series data efficiently
+  # - Provides a query language (PromQL)
+  # - Powers alerting and dashboards
+  #
+  prometheus:
+    image: prom/prometheus:v2.48.0
+    container_name: prometheus
+    restart: unless-stopped
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.path=/prometheus"
+      - "--web.console.libraries=/usr/share/prometheus/console_libraries"
+      - "--web.console.templates=/usr/share/prometheus/consoles"
+    ports:
+      - "9090:9090" # Prometheus UI
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml
+      - prometheus_data:/prometheus
+    networks:
+      - telemetry-net
+    depends_on:
+      - jaeger
+
+  # ============================================================================
+  # LOKI - Log Aggregation
+  # ============================================================================
+  #
+  # 🎓 WHAT IS LOKI?
+  # Loki is a log aggregation system (like Elasticsearch for logs).
+  # It:
+  # - Receives logs from your app
+  # - Stores them efficiently with label indexing
+  # - Provides a query interface via LogQL
+  # - Integrates with Grafana for visualization
+  #
+  loki:
+    image: grafana/loki:2.9.2
+    container_name: loki
+    restart: unless-stopped
+    ports:
+      - "3100:3100" # Loki API
+    command: -config.file=/etc/loki/local-config.yaml
+    volumes:
+      - ./loki-config.yaml:/etc/loki/local-config.yaml
+      - loki_data:/loki
+    networks:
+      - telemetry-net
+    depends_on:
+      - jaeger
+
+  # ============================================================================
+  # GRAFANA - Unified Dashboard
+  # ============================================================================
+  #
+  # 🎓 WHAT IS GRAFANA?
+  # Grafana is the visualization layer for your observability stack.
+  # It:
+  # - Connects to Prometheus (metrics), Loki (logs), Jaeger (traces)
+  # - Creates dashboards combining all three data sources
+  # - Provides alerting capabilities
+  # - Supports role-based access control
+  #
+  grafana:
+    image: grafana/grafana:10.2.3
+    container_name: grafana
+    restart: unless-stopped
+    ports:
+      - "3001:3000" # Grafana UI (internal 3000 → external 3001)
+    environment:
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+      - GF_INSTALL_PLUGINS=grafana-piechart-panel
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./grafana-datasources.yaml:/etc/grafana/provisioning/datasources/datasources.yaml
+      - ./grafana-dashboards.yaml:/etc/grafana/provisioning/dashboards/dashboards.yaml
+      - ./grafana-dashboards:/var/lib/grafana/dashboards
+    networks:
+      - telemetry-net
+    depends_on:
+      - prometheus
+      - loki
+
+# ============================================================================
+# NETWORKS
+# ============================================================================
+networks:
+  telemetry-net:
+    driver: bridge
+# ============================================================================
+# VOLUMES (for data persistence)
+# ============================================================================
+volumes:
+  prometheus_data:
+    driver: local
+  loki_data:
+    driver: local
+  grafana_data:
+    driver: local
+# 🎓 NOTE: Jaeger All-in-One uses in-memory storage by default.
+# Data is lost when the container stops. For learning, this is fine!
+# For production, use proper storage backends.
+#

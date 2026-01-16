@@ -1,0 +1,97 @@
+# ============================================================================
+# OPENTELEMETRY COLLECTOR CONFIGURATION
+# ============================================================================
+#
+# 🎓 WHAT IS THE OTEL COLLECTOR?
+# The OpenTelemetry Collector is a vendor-agnostic proxy that receives,
+# processes, and exports telemetry data. It acts as a central hub:
+#
+# Your Next.js App → OTEL Collector → Jaeger (traces)
+#                                   → Prometheus (metrics)
+#                                   → Loki (logs)
+#
+# WHY USE A COLLECTOR?
+# 1. Decouples your app from specific backends
+# 2. Can transform/filter data before exporting
+# 3. Reduces load on your app (batching, retry logic)
+# 4. Single endpoint for all telemetry types
+#
+# ============================================================================
+
+receivers:
+  # OTLP Receiver - receives data from your Next.js app
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:4317
+      http:
+        endpoint: 0.0.0.0:4318
+
+processors:
+  # Batch processor - batches data before export for efficiency
+  batch:
+    timeout: 5s
+    send_batch_size: 512
+
+  # Memory limiter - prevents OOM errors
+  memory_limiter:
+    check_interval: 1s
+    limit_mib: 512
+    spike_limit_mib: 128
+
+exporters:
+  # ============================================================================
+  # TRACES → JAEGER
+  # ============================================================================
+  otlp/jaeger:
+    endpoint: jaeger:4317
+    tls:
+      insecure: true
+
+  # ============================================================================
+  # METRICS → PROMETHEUS
+  # ============================================================================
+  # 🎓 The prometheus exporter exposes a /metrics endpoint that Prometheus scrapes
+  prometheus:
+    endpoint: 0.0.0.0:8889
+    namespace: nextjs_app
+    const_labels:
+      service: nextjs-telem
+
+  # ============================================================================
+  # LOGS → LOKI
+  # ============================================================================
+  # 🎓 Loki exporter sends logs to Loki's push API
+  loki:
+    endpoint: http://loki:3100/loki/api/v1/push
+    default_labels_enabled:
+      exporter: true
+      job: true
+
+  # Debug exporter - useful for troubleshooting
+  debug:
+    verbosity: basic
+
+service:
+  pipelines:
+    # Traces pipeline: receive OTLP → process → export to Jaeger
+    traces:
+      receivers: [otlp]
+      processors: [memory_limiter, batch]
+      exporters: [otlp/jaeger, debug]
+
+    # Metrics pipeline: receive OTLP → process → expose for Prometheus to scrape
+    metrics:
+      receivers: [otlp]
+      processors: [memory_limiter, batch]
+      exporters: [prometheus, debug]
+
+    # Logs pipeline: receive OTLP → process → export to Loki
+    logs:
+      receivers: [otlp]
+      processors: [memory_limiter, batch]
+      exporters: [loki, debug]
+
+  telemetry:
+    logs:
+      level: info
